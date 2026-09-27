@@ -1,0 +1,7 @@
+{
+  "name": "mcart-strona",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Strona www McART Sp. z o.o.",
+  "engines": { "node": ">=18" }
+}
