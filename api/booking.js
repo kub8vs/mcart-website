@@ -2,7 +2,8 @@
 // Tworzy wydarzenie w Kalendarzu Google z linkiem Google Meet i wysyła zaproszenie klientowi.
 const g = require('./_lib/gcal');
 const crypto = require('crypto');
-const hits = new Map();
+const hits = new Map();       // limit: 1 rezerwacja / min z jednego IP (w obrębie instancji)
+const perEmail = new Map();   // limit: 1 rezerwacja / 24 h na jeden adres e-mail (w obrębie instancji)
 
 const clean = (v, max = 200) => String(v ?? '').replace(/[\r\n]+/g, ' ').trim().slice(0, max);
 
@@ -11,7 +12,9 @@ module.exports = async (req, res) => {
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ ok: false }); }
   if (!g.configured()) return res.status(503).json({ ok: false, message: 'Kalendarz nie jest podłączony' });
 
-  const b = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+  let b;
+  try { b = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {}); }
+  catch { return res.status(400).json({ ok: false, message: 'Niepoprawne dane.' }); }
   if (b.website) return res.status(200).json({ ok: true }); // bot
 
   const date = clean(b.date, 10), time = clean(b.time, 5);
@@ -21,6 +24,8 @@ module.exports = async (req, res) => {
 
   const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0] || 'x';
   if (hits.has(ip) && Date.now() - hits.get(ip) < 60000) return res.status(429).json({ ok: false, message: 'Spróbuj ponownie za minutę.' });
+  const ek = email.toLowerCase();
+  if (perEmail.has(ek) && Date.now() - perEmail.get(ek) < 86400000) return res.status(429).json({ ok: false, message: 'Na ten adres jest już umówione spotkanie. W razie zmian zadzwoń: 42 636 55 94.' });
 
   try {
     const token = await g.accessToken();
@@ -46,6 +51,7 @@ module.exports = async (req, res) => {
     const ev = await r.json();
     if (!r.ok) throw new Error('insert error: ' + JSON.stringify(ev));
     hits.set(ip, Date.now());
+    perEmail.set(ek, Date.now());
     const meet = ev.hangoutLink || (ev.conferenceData && ev.conferenceData.entryPoints && (ev.conferenceData.entryPoints.find((x) => x.entryPointType === 'video') || {}).uri) || '';
     return res.status(200).json({ ok: true, meet, eventLink: ev.htmlLink });
   } catch (e) {
